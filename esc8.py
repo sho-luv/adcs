@@ -29,6 +29,29 @@ def get_ip_address(ifname):
         struct.pack('256s', ifname[:15].encode('utf-8'))  # Encode string as bytes
     )[20:24])
 
+def login_and_get_status(dns_name, username, password):
+    url = f"http://{dns_name}/certsrv/certfnsh.asp"
+    try:
+        pretty_print("[*] Trying to auth to " + url)
+        response = requests.get(url, auth=HTTPBasicAuth(username, password))
+        status_code = response.status_code
+
+        if status_code == 200:
+            pretty_print("[*] Successful login")
+        elif status_code == 401:
+            pretty_print("[!] User Is Unauthorized To Access Web Enrollment On " + dns_name, verbose=True)
+        elif status_code == 403:
+            pretty_print("[!] Web Enrollment Server 403 Forbidden Access Deined", verbose=True)
+        elif status_code == 404:
+            pretty_print("[!] Web Enrollment Server 404 Error Not Found", verbose=True)
+        # Add additional elif statements here for other status codes
+        else:
+            pretty_print("[!] Web Enrollment ERROR: HTTP status code:" + str(status_code), verbose=True)
+
+        return status_code
+    except requests.exceptions.RequestException as e:
+        print("Request failed:", str(e))
+
 def pretty_print(line, verbose=False):
     line = line.rstrip('\n')  # remove trailing newline characters
     colored_line = line
@@ -45,6 +68,7 @@ def pretty_print(line, verbose=False):
 def certipy_auth(certname,  domain, verbose=False):
     pfx = certname + ".pfx"
     command = ["certipy", "auth", "-pfx", pfx, "-username", certname, "-domain", domain]
+    pretty_print("[*] " + " ".join(command))
     process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True)
     for line in process.stdout:
         pretty_print(line, verbose)
