@@ -8,6 +8,16 @@ The tool automates the process of authenticating to a web enrollment server, pot
 
 Before running the script, make sure that [certipy](https://github.com/ly4k/Certipy), and [Impacket's ntlmrelayx](https://github.com/fortra/impacket.git), are installed and properly set up in your Python environment. [certipy](https://github.com/ly4k/Certipy) are external dependencies that need to be installed separately.
 
+### Install certipy
+```
+pip3 install certipy-ad
+```
+
+### Install Impacket
+```
+python3 -m pipx install impacket
+```
+
 ## Usage
 
 This is a command line tool which can be executed as follows:
