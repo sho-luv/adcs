@@ -17,7 +17,12 @@ pip3 install certipy-ad
 ```
 python3 -m pipx install impacket
 ```
-
+### Install This Tool
+```
+git clone https://github.com/sho-luv/adcs.git
+cd adcs
+pip install install -r requirements.txt
+```
 ## Usage
 
 This is a command line tool which can be executed as follows:
