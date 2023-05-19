@@ -253,20 +253,9 @@ def main():
 
     password = options.password
     lmhash = nthash = ''
-
-    if options.hashes is not None and password is not None:
-        print("Error: You cannot provide both password and hashes.")
-        sys.exit(1)
-    elif options.hashes is not None:
+    if options.hashes is not None:
         lmhash, nthash = options.hashes.split(':')
-    elif password is None:  # No password or hashes provided, ask for password
-        from getpass import getpass
-        print("Password not provided, please enter password: ")
-        password = getpass()
-        if not password:  # user didn't enter password
-            print("Invalid password")
-            sys.exit(1)
-
+        
     certipy_find(username, password, nthash, domain, options.verbose)
     run_ntlmrelayx_and_petitpotam(username, password, nthash, domain, options.verbose)
 
