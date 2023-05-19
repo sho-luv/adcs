@@ -251,7 +251,6 @@ def main():
         from getpass import getpass
         password = getpass("Password:")
 
-    password = options.password
     lmhash = nthash = ''
     if options.hashes is not None:
         lmhash, nthash = options.hashes.split(':')
