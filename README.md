@@ -37,8 +37,6 @@ options:
                         NT/LM hashes (LM hash can be empty)
 ```
 
-
-
 ## Arguments
 
 - `domain`: Domain to authenticate against.
@@ -62,3 +60,7 @@ Contributions are welcome. Please open an issue to discuss your ideas or initiat
 
 This tool is intended for security research purposes and should only be used with the proper permissions.
 
+## Acknowledgments
+
+Big thanks to chatGPT for assisting in the development of this tool.
+Shoutout to all security researchers and developers contributing to certipy and ntlmrelayx projects.
