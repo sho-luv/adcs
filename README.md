@@ -1,12 +1,12 @@
 # Active Directory Certificate Services (ADCS) Auto Exploit Tool
 
-This tool is developed by Leon Johnson (twitter: @sho_luv) and is a Python wrapper for `certipy` and `ntlmrelayx` to automate escalation of privileges (esc8) in an environment where Active Directory Certificate Services (ADCS) is used. I will add other ADCS attacks as I get time. 
+This tool is developed by Leon Johnson (twitter: @sho_luv) and is a Python wrapper for [certipy](https://github.com/ly4k/Certipy) and [Impacket's ntlmrelayx](https://github.com/fortra/impacket.git) to automate escalation of privileges (esc8) in an environment where Active Directory Certificate Services (ADCS) is used. I will add other ADCS attacks as I get time. 
 
 The tool automates the process of authenticating to a web enrollment server, potentially identifying and exploiting vulnerabilities in the ADCS setup to gain higher privileges in the system.
 
 ## Installation
 
-Before running the script, make sure that `certipy`, and `ntlmrelayx`, are installed and properly set up in your Python environment. `certipy` are external dependencies that need to be installed separately.
+Before running the script, make sure that [certipy](https://github.com/ly4k/Certipy), and [Impacket's ntlmrelayx](https://github.com/fortra/impacket.git), are installed and properly set up in your Python environment. [certipy](https://github.com/ly4k/Certipy) are external dependencies that need to be installed separately.
 
 ## Usage
 
@@ -49,7 +49,7 @@ options:
 
 - Automatically detects web enrollment servers and attempts to authenticate to them.
 - Identifies if the user is unauthorized to access the web enrollment server.
-- Uses `certipy` and `ntlmrelayx` to exploit the ADCS setup and escalate privileges, if possible.
+- Uses [certipy](https://github.com/ly4k/Certipy) and [Impacket's ntlmrelayx](https://github.com/fortra/impacket.git) to exploit the ADCS setup and escalate privileges, if possible.
 - Prints detailed status and error messages.
 
 ## Contributing
@@ -63,4 +63,4 @@ This tool is intended for security research purposes and should only be used wit
 ## Acknowledgments
 
 Big thanks to chatGPT for assisting in the development of this tool.
-Shoutout to all security researchers and developers contributing to certipy and ntlmrelayx projects.
+Shoutout to all security researchers and developers contributing to [certipy](https://github.com/ly4k/Certipy) and [Impacket's ntlmrelayx](https://github.com/fortra/impacket.git) projects.
