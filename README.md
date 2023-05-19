@@ -6,7 +6,7 @@ The tool automates the process of authenticating to a web enrollment server, pot
 
 ## Installation
 
-Before running the script, make sure that `certipy`, `ntlmrelayx`, and `PetitPotam` are installed and properly set up in your Python environment. `certipy` and `PetitPotam` are external dependencies that need to be installed separately.
+Before running the script, make sure that `certipy`, and `ntlmrelayx`, are installed and properly set up in your Python environment. `certipy` are external dependencies that need to be installed separately.
 
 ## Usage
 
